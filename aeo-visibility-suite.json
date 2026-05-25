@@ -1,0 +1,1063 @@
+{
+  "name": "aeo-visibility-suite",
+  "nodes": [
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=CRITICAL RULES FOR EXTRACTION:\n- VERBATIM EXTRACTION: Extract brand names EXACTLY as they appear in the text. Do not correct, expand, or alter suffixes (e.g., never change \"LLC\" to \"Limited\" or \"Inc\").\n- EXTRACT VARIATIONS SEPARATELY: If a brand is mentioned by itself (e.g., \"Altenew\"), alongside a product (e.g., \"Altenew Stampwheel\"), or as a URL (e.g., \"altenew.com\"), DON'T treat each occurrence as a separate, distinct mention in your extraction list.\n- Extract brands in the order they first appear.\n- Extract at least 10 brands if they exist, but ONLY if they are actually mentioned.\n- Ignore generic terms like \"company\", \"firm\", \"lawyers\", \"agency\".\n\nCRITICAL RULES FOR MATCHING TARGET BRAND:\n- You must check if the \"Target brand to check for\" is present in the extracted list.\n- USE ADVANCED SMART MATCHING: The Target Brand counts as FOUND if an extracted mention meets ANY of these conditions:\n  1. Exact or Partial Core Match: The text mentions a clear variation (e.g., Target \"Apple Inc\" matches \"Apple\").\n  2. Brand + Product Match: The text contains the brand name as part of a product name (e.g., Target \"Altenew\" matches \"Altenew Stampwheel\").\n  3. URL / Domain Match: The text contains the brand's website (e.g., Target \"Altenew\" matches \"altenew.com\" or \"www.altenew.com\").\n  4. Typo / Spelling Match: The text contains a clear minor typo of the target brand (e.g., Target \"Altnew\" matches \"Altenew\").\n- MULTIPLE MATCHES: A target brand may be matched multiple times in the same text across different variations. You don't need to identify and count ALL of them.\n\nText to analyze: {{ $json.textContent }}\n\nTarget brand to check for: {{ $('Switch').item.json.Brand }}\n\nReturn ONLY a valid JSON object in this strict format:\n{\n  \"brand_mentions\": [\n    {\"mention\": \"Exact String From Text\", \"position\": 1},\n    {\"mention\": \"Another Brand\", \"position\": 2}\n  ],\n  \"total_brands\": <number of total brands found>,\n  \"brand_analyzed\": \"{{ $('Split Out1').item.json[\"body.Brand\"] }}\",\n  \"target_match_count\": <number of times the target brand or its variations were found>,\n  \"matched_variations\": [\n    <Array of strings listing EVERY matched variation of the target brand found in the text, e.g., [\"Altenew\", \"Altenew Stampwheel\", \"altenew.com\"] - leave empty [] if none found>\n  ],\n  \"brand_position\": <position number of the FIRST/HIGHEST match found (using Smart Matching), or null if not found>,\n  \"visibility_score\": <calculated score based on the FIRST match, or 0 if brand not found>\n}\n\nVisibility Score Formula (only if brand IS found):\nScore = (N - P + 1) * (100 / N)\nwhere N = total brands, P = position of the FIRST target brand match (brand_position)\n\nIf fewer than 10 brands exist in the text, only include the actual brands found. Do not add placeholders.",
+        "batching": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.7,
+      "position": [
+        -3232,
+        520
+      ],
+      "id": "0b5c9af0-078f-4759-a6fd-abaef55d9578",
+      "name": "Mentions1",
+      "retryOnFail": true,
+      "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {
+        "jsCode": "// 1. Iterate over each incoming item\nconst results = items.map(item => {\n  // Get the raw string from the 'text' field\n  let rawContent = item.json.text;\n\n  // 2. CLEANUP: Remove Markdown code blocks (```json ... ```)\n  // This regex removes the start ```json (case insensitive) and the end ```\n  rawContent = rawContent.replace(/^```json\\s*/i, \"\")\n                         .replace(/^```\\s*/, \"\")\n                         .replace(/\\s*```$/, \"\");\n\n  // 3. PARSE: Convert the clean string into a real JavaScript object\n  try {\n    const data = JSON.parse(rawContent);\n\n    // Return the specific fields you requested\n    return {mentions:{\n      visibility_score: data.visibility_score,\n      brand_position: data.brand_position,\n      brand_analyzed: data.brand_analyzed,\n      total_brands: data.total_brands,\n      brand_mentions: data.brand_mentions\n    }}\n  } catch (error) {\n    // Returns an error object if one of the inputs is bad JSON\n    return { error: \"Failed to parse JSON\", raw_input: rawContent };\n  }\n});\n\n// 4. OUTPUT: Return the single object with the 'mentions' array\nreturn results;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -2880,
+        520
+      ],
+      "id": "68eb39ed-56ef-4a63-8e3f-4a82bc9bf9b4",
+      "name": "mentions1"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenRouter",
+      "typeVersion": 1,
+      "position": [
+        -3160,
+        744
+      ],
+      "id": "f295ed4e-1a52-45b5-b16e-8e73a5864f20",
+      "name": "OpenRouter Chat Model4"
+    },
+    {
+      "parameters": {
+        "model": "google/gemini-3-flash-preview",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenRouter",
+      "typeVersion": 1,
+      "position": [
+        -3160,
+        1336
+      ],
+      "id": "af8df578-24e8-4f62-b33d-95995a6d9211",
+      "name": "OpenRouter Chat Model5"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=You are an expert AEO (Answer Engine Optimization) strategist. Your task is to perform a competitive analysis based on the raw AI-generated text provided below.Target Brand: {{ $('Split Out1').item.json[\"body.Brand\"] }} \n\n\nRaw Text: {{ $json.textContent }}\n\n### Execution Instructions:\n\n1. **Competitor Extraction:** Identify the specific brand names mentioned in the text. Treat the order of mention as a ranking of authority/visibility (1st is strongest).\n\n2. **Presence Check:** Determine if the Target Brand ({{ $('Split Out1').item.json[\"body.Brand\"] }}) is present in the text.\n   - **If Present:** Analyze its positioning relative to the competitors. Is it a leader, a footnote, or a neutral alternative?\n   - **If Absent:** Focus immediately on the \"Gap Analysis.\" Isolate the top 3 mentioned brands and identify the specific adjectives, features, or semantic entities used to describe them. Treat these as the \"missing qualities\" the Target Brand needs to acquire.\n\n3. **Strategic Synthesis:**\n   - Combine the competitor landscape and the presence check into a strategic narrative.\n   - If the brand was absent, frame the Top 3's strengths as specific opportunities for the Target Brand (e.g., \"Since Brand X and Y are praised for [Feature], [Target Brand] must pivot its messaging to highlight [Feature] to compete\").\n\n### Output Constraints:\n**Format:** Produce exactly ONE single, cohesive prose paragraph.\n**Style:** Professional, analytical, and fluid. No bullet points, no lists, no headers.\n**Content:** Do not simply list names. Connect the insights (who is ranking, why they are ranking, and what the Target Brand must do) into a narrative flow.\"",
+        "batching": {}
+      },
+      "id": "53fbdb4d-0b2b-4017-b66b-7e538d4f1969",
+      "name": "Competitor Analysis1",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.7,
+      "position": [
+        -3232,
+        1112
+      ],
+      "retryOnFail": true,
+      "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "fb54afd1-a9ac-4667-bb5b-6f19ff6d2bba",
+              "name": "CompetitorAnalysis",
+              "value": "={{ $json.text }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -2880,
+        1112
+      ],
+      "id": "b963d2b3-88da-48b3-be14-62132897cebf",
+      "name": "Edit Fields1"
+    },
+    {
+      "parameters": {
+        "numberInputs": 4
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        -2656,
+        492
+      ],
+      "id": "59d6fe03-b364-44ea-b0a2-7da678210b5c",
+      "name": "Merge1"
+    },
+    {
+      "parameters": {
+        "jsCode": "// 1. Get all input items\nconst items = $input.all();\n\n// Get current date and format as YYYY-MM-DD\nconst now = new Date();\nconst year = now.getFullYear();\nconst month = String(now.getMonth() + 1).padStart(2, '0');\nconst day = String(now.getDate()).padStart(2, '0');\nconst currentDate = `${year}-${month}-${day}`;\n\n// 2. Identify ALL unique column names from ALL items\nconst keySet = new Set();\nitems.forEach(item => {\n  if (item.json) {\n    Object.keys(item.json).forEach(key => keySet.add(key));\n  }\n});\nconst keys = Array.from(keySet);\n\n// 3. Create temporary storage for cleaned columns\nconst columns = {};\nkeys.forEach(key => columns[key] = []);\n\n// 4. Iterate through every row and extract valid data\nitems.forEach(item => {\n  keys.forEach(key => {\n    const value = item.json[key];\n    if (value !== undefined && value !== null && value !== \"\") {\n      columns[key].push(value);\n    }\n  });\n});\n\n// 5. Determine the max height of the new table\nlet maxRows = 0;\nkeys.forEach(key => {\n  if (columns[key].length > maxRows) {\n    maxRows = columns[key].length;\n  }\n});\n\n// 6. Reconstruct the rows\nconst result = [];\n\nfor (let i = 0; i < maxRows; i++) {\n  const newRow = {};\n  \n  // Apply the dynamic date\n  newRow[\"date\"] = currentDate;\n\n  keys.forEach(key => {\n    newRow[key] = columns[key][i] !== undefined ? columns[key][i] : null;\n  });\n  \n  result.push({ json: newRow });\n}\n\nreturn result;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -2432,
+        468
+      ],
+      "id": "e05d22c2-6e43-40a7-89df-0a126208dac3",
+      "name": "Code3"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Loop over input items and add a new field called 'myNewField' to the JSON of each one\nreturn {brandNquery: $input.item.json};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1536,
+        428
+      ],
+      "id": "0bd9d5b5-76d5-4cb1-8c4a-9202797d14d5",
+      "name": "Brand & Query"
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\n\nreturn items.map(item => {\n    const data = item.json;\n\n    let extractedText = data.choices[0].message.content;\n    let annotations = data.choices[0].message.annotations;\n\n  let extractedAnnotations = [];\n\n  for (const source of annotations) {\n        extractedAnnotations.push(source.url_citation)\n    }\n    // 4. Return the exact structure your downstream nodes expect\n    return {\n        json: {\n            textContent: extractedText,\n            annotations: extractedAnnotations\n        }\n    };\n});"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -3456,
+        1408
+      ],
+      "id": "0a9631b9-a5a5-4b4a-8309-d1eefaad657f",
+      "name": "Code in JavaScript",
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        -3680,
+        2240
+      ],
+      "id": "7af8640e-9c05-4d98-8129-080a17beffa1",
+      "name": "OpenRouter - Perplexity",
+      "retryOnFail": true,
+      "waitBetweenTries": 2000,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "={{ $json.brandNquery.sheetID }}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "Results",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1tNK3AKted3zE_1-1NkoyFZkiSfCD7psizh7sXNbTPuY/edit#gid=0"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Date ": "={{ $json.date }}",
+            "Platform": "={{ $json.brandNquery.platform }}",
+            "Brand ": "={{ $json.brandNquery.brand }}",
+            "Query": "={{ $json.brandNquery.query }}",
+            "Raw Output": "={{ $json.textContent }}",
+            "URLS ": "={{ $json.annotations }}",
+            "Mention 1 ": "={{ $json.mentions.brand_mentions[0].mention }}",
+            "Mention2 ": "={{ $json.mentions.brand_mentions[1].mention }}",
+            "Mention 3 ": "={{ $json.mentions.brand_mentions[2].mention }}",
+            "Mention 4": "={{ $json.mentions.brand_mentions[3].mention }}",
+            "Mention 5": "={{ $json.mentions.brand_mentions[4].mention }}",
+            "Mention 6": "={{ $json.mentions.brand_mentions[5].mention }}",
+            "Mention 7": "={{ $json.mentions.brand_mentions[6].mention }}",
+            "Mention 8": "={{ $json.mentions.brand_mentions[7].mention }}",
+            "Mention 9": "={{ $json.mentions.brand_mentions[8].mention }}",
+            "Mention 10": "={{ $json.mentions.brand_mentions[9].mention }}",
+            "Visbility score ": "={{ $json.mentions.visibility_score }}",
+            "Total Brands": "={{ $json.mentions.total_brands }}",
+            "Brand Postions ": "={{ $json.mentions.brand_position }}",
+            "Competitors Analysis ": "={{ $json.CompetitorAnalysis }}",
+            "Queries": "={{ $json.queries }}",
+            "Sources": "={{ $json.sources }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "Date ",
+              "displayName": "Date ",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Platform",
+              "displayName": "Platform",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Brand ",
+              "displayName": "Brand ",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Query",
+              "displayName": "Query",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Raw Output",
+              "displayName": "Raw Output",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "URLS ",
+              "displayName": "URLS ",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Mention 1 ",
+              "displayName": "Mention 1 ",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Mention2 ",
+              "displayName": "Mention2 ",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Mention 3 ",
+              "displayName": "Mention 3 ",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Mention 4",
+              "displayName": "Mention 4",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Mention 5",
+              "displayName": "Mention 5",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Mention 6",
+              "displayName": "Mention 6",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Mention 7",
+              "displayName": "Mention 7",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Mention 8",
+              "displayName": "Mention 8",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Mention 9",
+              "displayName": "Mention 9",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Mention 10",
+              "displayName": "Mention 10",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Visbility score ",
+              "displayName": "Visbility score ",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Total Brands",
+              "displayName": "Total Brands",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Brand Postions ",
+              "displayName": "Brand Postions ",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Competitors Analysis ",
+              "displayName": "Competitors Analysis ",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Sources",
+              "displayName": "Sources",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Queries",
+              "displayName": "Queries",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        -2208,
+        468
+      ],
+      "id": "158b65ec-d421-4b70-9d91-f365d3e74c83",
+      "name": "Append row in sheet1"
+    },
+    {
+      "parameters": {
+        "jsCode": "\nfor (const item of $input.all()) {\n  item.json.myNewField = 1;\n}\nconst now = new Date();\nconst year = now.getFullYear();\nconst month = String(now.getMonth() + 1).padStart(2, '0');\nconst day = String(now.getDate()).padStart(2, '0');\nconst currentDate = `${year}-${month}-${day}`;\nconst brand = $input.first().json.body.Brand\n\nreturn [{date: currentDate, brand: brand}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -3168,
+        224
+      ],
+      "id": "aa2a7dbd-8dd8-41d1-8db5-0a133989af47",
+      "name": "Code in JavaScript6"
+    },
+    {
+      "parameters": {
+        "operation": "copy",
+        "fileId": {
+          "__rl": true,
+          "value": "1fyjQ9ikVSeENtnAnwL7DzW-ZrnvQHpJymqv5WPSmhWo",
+          "mode": "list",
+          "cachedResultName": "All-In-One AI Visibility Template",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1fyjQ9ikVSeENtnAnwL7DzW-ZrnvQHpJymqv5WPSmhWo/edit?usp=drivesdk"
+        },
+        "name": "={{ $json.brand }} - {{ $json.date }}",
+        "sameFolder": false,
+        "driveId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "My Drive"
+        },
+        "folderId": {
+          "__rl": true,
+          "value": "1C-GB6KP0CIDoT0BLZA8j_zJdPZEhfvc7",
+          "mode": "list",
+          "cachedResultName": "AI Visibility Reports",
+          "cachedResultUrl": "https://drive.google.com/drive/folders/1C-GB6KP0CIDoT0BLZA8j_zJdPZEhfvc7"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        -2880,
+        224
+      ],
+      "id": "8f644986-3445-4c07-9bf5-55d673efdb28",
+      "name": "Copy file1"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "9354ee9a-dc03-4072-a312-0ce2a8f7d7f8",
+              "name": "body.Brand",
+              "value": "={{ $('Edit Fields9').item.json.body.Brand }}",
+              "type": "string"
+            },
+            {
+              "id": "555b1c0b-99c2-4a9a-a1bb-80300d8c051c",
+              "name": "body.Query",
+              "value": "={{ $('Edit Fields9').item.json.body.Query }}",
+              "type": "array"
+            },
+            {
+              "id": "2a6b2c68-6c58-46e2-b123-3a9247b0d66f",
+              "name": "SheetID",
+              "value": "={{ $json.id }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -2656,
+        224
+      ],
+      "id": "87556337-725c-42e8-bd40-d1f259c33c46",
+      "name": "Edit Fields8"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "9354ee9a-dc03-4072-a312-0ce2a8f7d7f8",
+              "name": "body.Brand",
+              "value": "={{ $json.body.Brand }}",
+              "type": "string"
+            },
+            {
+              "id": "555b1c0b-99c2-4a9a-a1bb-80300d8c051c",
+              "name": "body.Query",
+              "value": "={{ $json.body.Query }}",
+              "type": "array"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -3456,
+        224
+      ],
+      "id": "8f3587e8-3c55-4f0e-9e16-1f1d33a65dea",
+      "name": "Edit Fields9"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "8c078f5b-4a1f-42fe-ac0e-f4b4fd5c6a7a",
+              "name": "query",
+              "value": "={{ $json.query }}",
+              "type": "string"
+            },
+            {
+              "id": "79d67808-7ee3-4492-a8a1-810fc72f0226",
+              "name": "brand",
+              "value": "={{ $json.Brand }}",
+              "type": "string"
+            },
+            {
+              "id": "7b9d6d67-67a9-4971-8211-1ca89849ee58",
+              "name": "sheetID",
+              "value": "={{ $json.SheetID }}",
+              "type": "string"
+            },
+            {
+              "id": "8e243d87-e2f1-4861-9f90-020a07c84308",
+              "name": "platform",
+              "value": "={{ $json.platform }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -1760,
+        240
+      ],
+      "id": "3ad9d6bc-8be9-4bbd-bd21-2de1ea5c0016",
+      "name": "Edit Fields"
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "873bf322-b3db-4e92-99ec-d50579be2583",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        -3680,
+        224
+      ],
+      "id": "809db217-afeb-4129-a5ea-82b48fe82e3c",
+      "name": "Webhook",
+      "webhookId": "873bf322-b3db-4e92-99ec-d50579be2582"
+    },
+    {
+      "parameters": {
+        "fieldToSplitOut": "platform",
+        "include": "allOtherFields",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.splitOut",
+      "typeVersion": 1,
+      "position": [
+        -2208,
+        224
+      ],
+      "id": "2a56bd8a-02b3-4933-83a5-67e9e01856d9",
+      "name": "Split Out1"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        -1984,
+        356
+      ],
+      "id": "5555ad83-a3f1-4d61-b7e2-946df8a37fea",
+      "name": "Loop Over Items"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        -3680,
+        2464
+      ],
+      "id": "edec5599-9a6d-4259-87ba-e3f452e595e5",
+      "name": "DataForSEO - Ai Mode",
+      "retryOnFail": true,
+      "waitBetweenTries": 2000,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\n\nreturn items.map(item => {\n    const data = item.json;\n\n    let extractedText = data.tasks[0].result[0].items[0].markdown;\n    let extractedAnnotations = data.tasks[0].result[0].items[0].references;\n  let extractedSources = data.tasks[0].result[0].items[0].items[0].links;\n\n    // 4. Return the exact structure your downstream nodes expect\n    return {\n        json: {\n            textContent: extractedText,\n            annotations: extractedAnnotations,\n            sources: extractedSources\n        }\n    };\n});"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -3456,
+        1792
+      ],
+      "id": "438bb632-5e8d-4556-8ea1-684f0aa8384d",
+      "name": "Code in JavaScript1",
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        -3680,
+        0
+      ],
+      "id": "8f4d181f-b63e-4837-b258-547ed1ce3673",
+      "name": "HTTP Request",
+      "retryOnFail": true,
+      "waitBetweenTries": 2000,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\n\nreturn items.map(item => {\n    const data = item.json;\n    \n    // The new model puts the array inside 'output'\n    const outputArray = data.output || [];\n\n    let extractedText = null;\n    let extractedAnnotations = [];\n    let extractedSources = [];\n    let extractedQueries = [];\n\n    // Loop through every item in the output array, regardless of its position\n    for (const event of outputArray) {\n        \n        // 1. If this event is a search call, grab the sources and queries\n        if (event.type === \"web_search_call\" && event.action) {\n            if (event.action.sources) {\n                // Add these sources to our master list\n                extractedSources = extractedSources.concat(event.action.sources);\n            }\n            if (event.action.queries) {\n                // Add these queries to our master list\n                extractedQueries = extractedQueries.concat(event.action.queries);\n            }\n        }\n\n        // 2. If this event is the final message, grab the text and annotations\n        if (event.type === \"message\" && event.content && event.content[0]) {\n            const contentBlock = event.content[0];\n            if (contentBlock.type === \"output_text\") {\n                extractedText = contentBlock.text || null;\n                extractedAnnotations = (contentBlock.annotations || []).map(annotation => ({\n            title: annotation.title,\n            url: annotation.url\n        }));\n            }\n        }\n    }\n\n    // 3. Deduplicate sources (since multiple searches might return the same URL)\n    const uniqueSources = [];\n    const seenUrls = new Set();\n    for (const source of extractedSources) {\n        if (source.url && !seenUrls.has(source.url)) {\n            seenUrls.add(source.url);\n            uniqueSources.push(source.url);\n        }\n    }\n\n    // 4. Return the exact structure your downstream nodes expect\n    return {\n        json: {\n            textContent: extractedText,\n            annotations: extractedAnnotations,\n            sources: uniqueSources,\n            // Use Set to remove duplicate queries\n            queries: [...new Set(extractedQueries)]\n        }\n    };\n});"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -3456,
+        816
+      ],
+      "id": "fb50dcd4-9667-40ff-a5d9-9f27867dc31d",
+      "name": "Code in JavaScript5",
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Fan out: queries × platforms, carrying Brand and SheetID on every item\nconst platforms = ['gpt', 'perplexity', 'ai_mode'];\n\nconst items = $input.all();\nconst output = [];\n\nfor (const item of items) {\n  const data = item.json;\n\n  // Handle the input shape:\n  // { body: { Brand, Query: [...] }, SheetID }\n  const brand = data.body?.Brand ?? data.Brand;\n  const queries = data.body?.Query ?? data.Query ?? [];\n  const sheetId = data.SheetID ?? data.sheetId;\n\n  // Normalize: Query may be a single string or an array\n  const queryList = Array.isArray(queries) ? queries : [queries];\n\n  for (const query of queryList) {\n    for (const platform of platforms) {\n      output.push({\n        json: {\n          Brand: brand,\n          SheetID: sheetId,\n          query: query,\n          platform: platform,\n        },\n      });\n    }\n  }\n}\n\nreturn output;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -2432,
+        224
+      ],
+      "id": "2f640e4b-08d6-44fa-9be5-d0ec893e348b",
+      "name": "Code in JavaScript2"
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict"
+                },
+                "conditions": [
+                  {
+                    "leftValue": "",
+                    "rightValue": "",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.4,
+      "position": [
+        -3680,
+        2016
+      ],
+      "id": "d44fe8f1-eb78-40cf-ac6e-e5939d6c0a8b",
+      "name": "Switch"
+    },
+    {
+      "parameters": {
+        "respondWith": "allIncomingItems",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        -1760,
+        488
+      ],
+      "id": "3cec512d-b546-44e8-8216-431cd058205c",
+      "name": "Respond to Webhook"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Mentions1": {
+      "main": [
+        [
+          {
+            "node": "mentions1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "mentions1": {
+      "main": [
+        [
+          {
+            "node": "Merge1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenRouter Chat Model4": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Mentions1",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenRouter Chat Model5": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Competitor Analysis1",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Competitor Analysis1": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Fields1": {
+      "main": [
+        [
+          {
+            "node": "Merge1",
+            "type": "main",
+            "index": 2
+          }
+        ]
+      ]
+    },
+    "Merge1": {
+      "main": [
+        [
+          {
+            "node": "Code3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code3": {
+      "main": [
+        [
+          {
+            "node": "Append row in sheet1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Brand & Query": {
+      "main": [
+        [
+          {
+            "node": "Merge1",
+            "type": "main",
+            "index": 3
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript": {
+      "main": [
+        [
+          {
+            "node": "Competitor Analysis1",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Merge1",
+            "type": "main",
+            "index": 1
+          },
+          {
+            "node": "Mentions1",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Append row in sheet1": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript6": {
+      "main": [
+        [
+          {
+            "node": "Copy file1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Copy file1": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields8",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Fields8": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Fields9": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript6",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Fields": {
+      "main": [
+        [
+          {
+            "node": "Brand & Query",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields9",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split Out1": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop Over Items": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Edit Fields",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript1": {
+      "main": [
+        [
+          {
+            "node": "Mentions1",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Merge1",
+            "type": "main",
+            "index": 1
+          },
+          {
+            "node": "Competitor Analysis1",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript5": {
+      "main": [
+        [
+          {
+            "node": "Mentions1",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Merge1",
+            "type": "main",
+            "index": 1
+          },
+          {
+            "node": "Competitor Analysis1",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript2": {
+      "main": [
+        [
+          {
+            "node": "Split Out1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "1ff3e8b7-0b82-4861-b2fc-13b86b28222f",
+  "meta": {
+    "instanceId": "3b8a448e182d625c37630e815985e1cd2d4604bd06d8ae245ae2fa2a3264de0b"
+  },
+  "id": "XsO92UL2O3gHp2C2",
+  "tags": []
+}
